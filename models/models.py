@@ -16,6 +16,12 @@ class ExtractViewingType(BaseModel):
         example=["Movie", "TV Show", "Miniseries"]
     )
 
+class ExtractRating(BaseModel):
+    rating: Optional[str] = Field(
+        description="Extract the rating of the movie",
+        default_factory=list,
+        example= "TV-Y7"
+    )
 
 class ExtractDescription(BaseModel):
     description: Optional[str] = Field(

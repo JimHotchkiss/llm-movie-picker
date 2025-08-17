@@ -1,7 +1,7 @@
 import os
 import logging
 import json
-from models.models import ExtractGenre, ExtractDescription,     ExtractVAD, ExtractViewingType
+from models.models import ExtractGenre, ExtractDescription,ExtractVAD, ExtractViewingType, ExtractRating
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -61,6 +61,7 @@ def extract_genre_from_request(request: dict) -> ExtractGenre:
                 3. Multiple genres should be listed in the order they are mentioned.
                 4. If a subgenre is mentioned (e.g., "Romantic Comedy"), include it as is.
                 5. If the genre is vague (e.g., "scary movies"), map it to the closest valid genre (e.g., "Horror").
+                6. Pluralize the genre (e.g., Mysteries, Comedies )
 
                 Examples:
 
@@ -71,13 +72,13 @@ def extract_genre_from_request(request: dict) -> ExtractGenre:
                 Output: ["Action", "Adventure"]
 
                 User: "Can you give me a good documentary?"
-                Output: ["Documentary"]
+                Output: ["Documentaries"]
 
                 User: "Surprise me with any movie."
                 Output: []
 
-                User: "I'd like horror, mystery, or thriller."
-                Output: ["Horror", "Mystery", "Thriller"]
+                User: "I'd like drama,horror, mystery, or thriller."
+                Output: ["Horror", "Mysteries", "Dramas" "Thriller"]
 
                 User: "I'd like an international movie with romance and comedy."
                 Output: ["International", "Romance", "Comedy"]
@@ -102,7 +103,7 @@ def extract_genre_from_request(request: dict) -> ExtractGenre:
     return genre_result
 
 # 1) Few-shots: user/assistant pairs as STRINGS
-few_shots = [
+view_type_few_shots = [
     {"role": "user", "content": "I want a TV show to binge this weekend."},
     {"role": "assistant", "content": json.dumps({"view_types": ["TV Series"]})},
 
@@ -120,7 +121,7 @@ few_shots = [
     {"role": "assistant", "content": json.dumps({"view_types": ["TV Series"]})},
 ]
 
-logger.info(f"few_shot: {few_shots}")
+logger.info(f"few_shot: {view_type_few_shots}")
 
 SYSTEM_PROMPT = """
     You extract the desired viewing type. Output JSON only: {"view_types": ["Movie","TV Series","Miniseries"]} or {"view_types": []}.
@@ -142,57 +143,14 @@ SYSTEM_PROMPT = """
 def build_messages(request_text: str):
     return (
         [{"role": "system", "content": SYSTEM_PROMPT}]
-        + few_shots
+        + view_type_few_shots
         + [{"role": "user", "content": request_text}]  # <-- real input goes here
     )
 
 def extract_viewing_type_from_request(request: dict) -> ExtractViewingType:
     logger.info(f"Extracting genre from request: {request}")
-    """
-    Extract the user's desired **view type** (e.g., Movie, TV Series, Miniseries) from a free-text request
-    and return it as an `ExtractViewType` model instance.
-
-    This function inspects the request text, normalizes common synonyms, and selects a single canonical
-    label. It is case-insensitive and ignores unrelated content (genres, titles, etc.). If no clear view
-    type is detected, the model will contain an empty/None value per the `ExtractViewType` schema.
-
-    Canonical values (normalized):
-    - "Movie"        (e.g., "movie", "film", "feature")
-    - "TV Series"    (e.g., "tv show", "show", "series")
-    - "Miniseries"   (e.g., "mini-series", "limited series", "limited")
-
-    Args:
-        request (dict): A request payload containing the user's text (for example, under "query" or
-            similar key). The function will read the relevant text field(s) to infer the view type.
-
-    Returns:
-        ExtractViewType: A Pydantic model instance with the extracted and normalized view type.
-            If no view type is found, the instance will reflect an empty/None value as defined
-            by your model.
-
-    Notes:
-    - When multiple view types are mentioned, the first explicit, unambiguous mention is preferred.
-    - Synonyms and abbreviations are mapped to the canonical values listed above.
-    - Ambiguous phrasing (e.g., "something to binge") does not force a guess; the function returns
-    empty/None unless a view type is clearly indicated.
-
-    Raises:
-        pydantic.ValidationError: If the constructed payload does not conform to `ExtractViewingType`.
-
-    Examples:
-        extract_viewing_type_from_request({"query": "I want a TV show to binge"})
-        ExtractViewingType(view_type="TV Series")
-
-        extract_viewing_type_from_request({"query": "Any good limited series?"})
-        ExtractViewingType(view_type="Miniseries")
-
-        extract_viewing_type_from_request({"query": "Surprise me"})
-        ExtractViewingType(view_type=None)  # or "", depending on your schema
-    """
     message = build_messages(str(request))
-
     logger.info("Generating confirmation message")
-
     viewing_type_extraction = client.beta.chat.completions.parse(
         model=model,
         messages = message,
@@ -202,6 +160,131 @@ def extract_viewing_type_from_request(request: dict) -> ExtractViewingType:
     viewing_type_result = viewing_type_extraction.choices[0].message.parsed
     logger.info(f"Confirmation message generated successfully: {viewing_type_result}")
     return viewing_type_result
+
+def build_rating_messages(request_text: str) -> list[dict]:
+    SYSTEM_PROMPT = """
+        You extract a **TV content rating** from a user's request.
+
+        Return JSON only in this exact schema:
+        {"rating":"<TV-Y|TV-Y7|TV-G|TV-PG|TV-14|TV-MA|>"}
+
+        Rules:
+        - Case-insensitive.
+        - Allowed values: TV-Y, TV-Y7, TV-G, TV-PG, TV-14, TV-MA.
+        - **If a rating is not explicitly named, infer it from age/tone/content cues**:
+        • toddlers/preschool/very young kids → TV-Y  
+        • ages ~7–10, mild peril/cartoons → TV-Y7  
+        • “family-friendly”, “for everyone”, no edgy content → TV-G  
+        • “with parents”, “parental guidance”, some mild language/themes → TV-PG  
+        • “teen-friendly”, “a bit edgy”, moderate violence/intensity → TV-14  
+        • “mature themes”, “explicit/graphic violence”, “strong language/sexual content” → TV-MA
+        - If multiple ratings are mentioned or implied, choose the **most restrictive** (TV-Y < TV-Y7 < TV-G < TV-PG < TV-14 < TV-MA).
+        - If the user gives an MPAA film rating, map it: G→TV-G, PG→TV-PG, PG-13→TV-14, R/NC-17→TV-MA.
+        - If cues are ambiguous or absent, return an empty string: {"rating": ""}.
+        - No extra keys or commentary—JSON only.
+        """.strip()
+
+    few_shots = [
+        # --- TV-Y (all children) ---
+        {"role": "user", "content": "An animated TV show for my toddler—gentle, no scares."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-Y"})},
+
+        {"role": "user", "content": "Preschool-friendly cartoon series with cute animals."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-Y"})},
+
+        # --- TV-Y7 (7+) ---
+        {"role": "user", "content": "A kids' adventure cartoon my 8-year-old can watch alone—some mild peril is fine."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-Y7"})},
+
+        {"role": "user", "content": "Actiony animated TV show for ages 7–10, nothing intense."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-Y7"})},
+
+        # --- TV-G (all ages / family) ---
+        {"role": "user", "content": "A family-friendly nature documentary film—safe for everyone."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-G"})},
+
+        {"role": "user", "content": "Wholesome comedy movie for all ages—no crude jokes or violence."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-G"})},
+
+        # --- TV-PG (parental guidance suggested) ---
+        {"role": "user", "content": "A fantasy family film with mild peril and a little kissing—parents okay with it."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-PG"})},
+
+        {"role": "user", "content": "Cooking competition TV series that kids can watch with parents—occasional mild language."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-PG"})},
+
+        # --- TV-14 (older teens; edgy but not explicit) ---
+        {"role": "user", "content": "A mystery/thriller movie suitable for older teens—tense but not graphic."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-14"})},
+
+        {"role": "user", "content": "A sci-fi TV series for teens 15+ with some strong language, no explicit content."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-14"})},
+
+        {"role": "user", "content": "A gritty crime drama miniseries for adults but not overly graphic."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-14"})},
+
+        # --- TV-MA (mature audiences only) ---
+        {"role": "user", "content": "A dark horror TV series for adults—graphic violence and disturbing content."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-MA"})},
+
+        {"role": "user", "content": "An adult animated comedy film with explicit language and sexual humor."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-MA"})},
+
+        # --- Mixed/edge cues (choose most restrictive) ---
+        {"role": "user", "content": "A political thriller series—complex themes, occasional strong language, some intense scenes."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-14"})},
+
+        {"role": "user", "content": "A war movie based on true events—realistic combat and blood, clearly for adults."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-MA"})},
+
+        # --- MPAA → TV mapping ---
+        {"role": "user", "content": "A PG-13 superhero movie—fun but can be intense."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-14"})},
+
+        {"role": "user", "content": "We want a G-rated animated film for a birthday party."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-G"})},
+
+        {"role": "user", "content": "A PG family adventure—some peril, nothing heavy."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-PG"})},
+
+        {"role": "user", "content": "An R-rated crime movie with strong language."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-MA"})},
+        
+        # # --- Ambiguous / no signal ---
+        # {"role": "user", "content": "Surprise us with a good sci-fi series."},
+        # {"role": "assistant", "content": json.dumps({"rating": ""})},
+
+        # --- Common phrasing you’ll encounter ---
+        {"role": "user", "content": "A cozy rom-com TV show—clean, no crude jokes—good for family nights."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-G"})},
+
+        {"role": "user", "content": "A detective series for adults—swearing is okay, just not graphic violence."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-14"})},
+
+        {"role": "user", "content": "An edgy cyberpunk movie with mature themes and some nudity."},
+        {"role": "assistant", "content": json.dumps({"rating": "TV-MA"})},
+    ]
+
+    return [{"role": "system", "content": SYSTEM_PROMPT}] + few_shots + [
+        {"role": "user", "content": request_text}
+    ]
+
+def extract_rating_from_request(request: dict) -> ExtractRating:
+    logger.info(f"Extracting rating from request: {request}")
+
+    message = build_messages(str(request))
+
+    logger.info("Generating confirmation message")
+
+    viewing_type_extraction = client.beta.chat.completions.parse(
+        model=model,
+        messages = message,
+        response_format=ExtractRating
+        )
+    
+    rating_result = viewing_type_extraction.choices[0].message.parsed
+    logger.info(f"Confirmation message generated successfully: {rating_result}")
+    return rating_result
 
 def extract_description_from_request(request: dict) -> ExtractDescription:
     logger.info(f"Extracting description from request: {request}")
