@@ -1,7 +1,8 @@
 import os
 import logging
 import json
-from models.models import ExtractGenre, ExtractDescription,ExtractVAD, ExtractViewingType, ExtractRating
+import streamlit as st
+from models.models import ExtractDescription,ExtractVAD, ExtractMovieVAD, ExtractViewingType, ExtractAudienceCategory
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -27,81 +28,6 @@ logger = logging.getLogger(__name__)
 
 
 
-def extract_genre_from_request(request: dict) -> ExtractGenre:
-    logger.info(f"Extracting genre from request: {request}")
-    """
-    Extracts the genre from the request dictionary and returns an ExtractGenre model instance.
-
-    Args:
-        request (dict): The request dictionary containing the genre information.
-    Returns:
-        ExtractGenre: An instance of ExtractGenre with the extracted genre.
-    """
-    """Third LLM call to generate a confirmation message"""
-    logger.info("Generating confirmation message")
-
-    genre_extraction = client.beta.chat.completions.parse(
-        model=model,
-        messages=[
-            {
-                "role": "system",
-                "content": """You are a movie genre extraction assistant.
-
-                Your task:
-                - Identify and extract the movie genre or genres mentioned in the user’s request.
-                - Return ONLY the genres as a list of strings in the exact wording the user provided (or the closest standard movie genre equivalent).
-                - If no genre is found, return an empty list.
-
-                Valid genres include but are not limited to:
-                Action, Adventure, Animation, Comedy, Crime, Documentary, Drama, Family, Fantasy, Horror, Mystery, Romance, Sci-Fi, Thriller, War, Western.
-
-                Rules:
-                1. Do not include extra commentary or unrelated text.
-                2. Genres must be capitalized properly (e.g., "Science Fiction" → "Sci-Fi").
-                3. Multiple genres should be listed in the order they are mentioned.
-                4. If a subgenre is mentioned (e.g., "Romantic Comedy"), include it as is.
-                5. If the genre is vague (e.g., "scary movies"), map it to the closest valid genre (e.g., "Horror").
-                6. Pluralize the genre (e.g., Mysteries, Comedies )
-
-                Examples:
-
-                User: "I want to watch a romantic comedy with friends."
-                Output: ["Romantic Comedy"]
-
-                User: "Find me some action and adventure films."
-                Output: ["Action", "Adventure"]
-
-                User: "Can you give me a good documentary?"
-                Output: ["Documentaries"]
-
-                User: "Surprise me with any movie."
-                Output: []
-
-                User: "I'd like drama,horror, mystery, or thriller."
-                Output: ["Horror", "Mysteries", "Dramas" "Thriller"]
-
-                User: "I'd like an international movie with romance and comedy."
-                Output: ["International", "Romance", "Comedy"]
-
-                User: "What’s a good family-friendly fantasy?"
-                Output: ["Family", "Fantasy"]
-
-                ---
-                Return only the extracted genres as JSON in this structure:
-                {"genre": ["<Genre1>", "<Genre2>", ...]}
-                """
-            },
-            {
-                "role": "user",
-                "content": str(request)  # Or pass the user's request string directly
-            }
-            ],
-            response_format=ExtractGenre,
-        )
-    genre_result = genre_extraction.choices[0].message.parsed
-    logger.info(f"Confirmation message generated successfully: {genre_result}")
-    return genre_result
-
 # 1) Few-shots: user/assistant pairs as STRINGS
 view_type_few_shots = [
     {"role": "user", "content": "I want a TV show to binge this weekend."},
@@ -120,8 +46,6 @@ view_type_few_shots = [
     {"role": "user", "content": "I want to watch a crime fiction, TV series that has a strong romantic component."},
     {"role": "assistant", "content": json.dumps({"view_types": ["TV Series"]})},
 ]
-
-logger.info(f"few_shot: {view_type_few_shots}")
 
 SYSTEM_PROMPT = """
     You extract the desired viewing type. Output JSON only: {"view_types": ["Movie","TV Series","Miniseries"]} or {"view_types": []}.
@@ -161,128 +85,87 @@ def extract_viewing_type_from_request(request: dict) -> ExtractViewingType:
     logger.info(f"Confirmation message generated successfully: {viewing_type_result}")
     return viewing_type_result
 
-def build_rating_messages(request_text: str) -> list[dict]:
-    SYSTEM_PROMPT = """
-        You extract a **TV content rating** from a user's request.
+def build_audience_category_messages(request_text: str):
+   cat_system_prompt = """
+        You classify the intended audience category for a movie/TV request.
 
         Return JSON only in this exact schema:
-        {"rating":"<TV-Y|TV-Y7|TV-G|TV-PG|TV-14|TV-MA|>"}
+        {"category":"<CHILDREN|TEEN|ADULT|>","confidence":<0..1>,"rationale":"<short reason>"}
 
-        Rules:
-        - Case-insensitive.
-        - Allowed values: TV-Y, TV-Y7, TV-G, TV-PG, TV-14, TV-MA.
-        - **If a rating is not explicitly named, infer it from age/tone/content cues**:
-        • toddlers/preschool/very young kids → TV-Y  
-        • ages ~7–10, mild peril/cartoons → TV-Y7  
-        • “family-friendly”, “for everyone”, no edgy content → TV-G  
-        • “with parents”, “parental guidance”, some mild language/themes → TV-PG  
-        • “teen-friendly”, “a bit edgy”, moderate violence/intensity → TV-14  
-        • “mature themes”, “explicit/graphic violence”, “strong language/sexual content” → TV-MA
-        - If multiple ratings are mentioned or implied, choose the **most restrictive** (TV-Y < TV-Y7 < TV-G < TV-PG < TV-14 < TV-MA).
-        - If the user gives an MPAA film rating, map it: G→TV-G, PG→TV-PG, PG-13→TV-14, R/NC-17→TV-MA.
-        - If cues are ambiguous or absent, return an empty string: {"rating": ""}.
-        - No extra keys or commentary—JSON only.
-        """.strip()
+        Guidelines:
+        - Categories (coarse): CHILDREN ≈ under 12; TEEN ≈ 13–17; ADULT ≈ 18+.
+        - Infer from age words and maturity cues (violence, language, sexual content, intensity). Don’t use mood alone.
+        - If multiple cues conflict, choose the MOST RESTRICTIVE (ADULT > TEEN > CHILDREN).
+        - Map ratings when present:
+        G / TV-Y / TV-G / TV-Y7 → CHILDREN
+        PG / TV-PG → TEEN
+        PG-13 / TV-14 → TEEN
+        R / NC-17 / TV-MA → ADULT
+        - If unclear, return {"category":"","confidence":0.0,"rationale":"insufficient cues"}.
+        - Keep rationale concise (<=12 words). Confidence to two decimals. No extra keys.
+""".strip()
+   
+   cat_few_shots = [
+       # CHILDREN
+        {"role":"user","content":"Animated TV show for my 6-year-old—gentle, no scares."},
+        {"role":"assistant","content": json.dumps({"category":"CHILDREN","confidence":0.95,"rationale":"explicitly for young child; gentle content"})},
 
-    few_shots = [
-        # --- TV-Y (all children) ---
-        {"role": "user", "content": "An animated TV show for my toddler—gentle, no scares."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-Y"})},
+        {"role":"user","content":"Wholesome family movie everyone can enjoy—no crude jokes."},
+        {"role":"assistant","content": json.dumps({"category":"CHILDREN","confidence":0.90,"rationale":"family-friendly all ages cues"})},
 
-        {"role": "user", "content": "Preschool-friendly cartoon series with cute animals."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-Y"})},
+        {"role":"user","content":"Nature documentary film that’s kid-safe and educational."},
+        {"role":"assistant","content": json.dumps({"category":"CHILDREN","confidence":0.88,"rationale":"kid-safe educational; no mature content"})},
 
-        # --- TV-Y7 (7+) ---
-        {"role": "user", "content": "A kids' adventure cartoon my 8-year-old can watch alone—some mild peril is fine."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-Y7"})},
+        # TEEN
+        {"role":"user","content":"PG family adventure—some peril, nothing heavy."},
+        {"role":"assistant","content": json.dumps({"category":"TEEN","confidence":0.80,"rationale":"PG mapping; mild peril"})},
 
-        {"role": "user", "content": "Actiony animated TV show for ages 7–10, nothing intense."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-Y7"})},
+        {"role":"user","content":"Teen-friendly sci-fi series—some language, no explicit content."},
+        {"role":"assistant","content": json.dumps({"category":"TEEN","confidence":0.82,"rationale":"teen-friendly with mild language"})},
 
-        # --- TV-G (all ages / family) ---
-        {"role": "user", "content": "A family-friendly nature documentary film—safe for everyone."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-G"})},
+        {"role":"user","content":"Mystery/thriller movie suitable for older teens—tense but not graphic."},
+        {"role":"assistant","content": json.dumps({"category":"TEEN","confidence":0.84,"rationale":"older teen cues; non-graphic"})},
 
-        {"role": "user", "content": "Wholesome comedy movie for all ages—no crude jokes or violence."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-G"})},
+        # ADULT
+        {"role":"user","content":"Dark crime drama miniseries for adults—strong language and sex scenes."},
+        {"role":"assistant","content": json.dumps({"category":"ADULT","confidence":0.94,"rationale":"adult themes: strong language and sexual content"})},
 
-        # --- TV-PG (parental guidance suggested) ---
-        {"role": "user", "content": "A fantasy family film with mild peril and a little kissing—parents okay with it."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-PG"})},
+        {"role":"user","content":"R-rated horror movie—graphic violence and disturbing imagery."},
+        {"role":"assistant","content": json.dumps({"category":"ADULT","confidence":0.97,"rationale":"R-rated; graphic violence cues"})},
 
-        {"role": "user", "content": "Cooking competition TV series that kids can watch with parents—occasional mild language."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-PG"})},
+        {"role":"user","content":"Adult animated comedy with explicit language and raunchy humor."},
+        {"role":"assistant","content": json.dumps({"category":"ADULT","confidence":0.92,"rationale":"explicit language and adult humor"})},
 
-        # --- TV-14 (older teens; edgy but not explicit) ---
-        {"role": "user", "content": "A mystery/thriller movie suitable for older teens—tense but not graphic."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-14"})},
+        # Most-restrictive rule
+        {"role":"user","content":"Mostly family-friendly but occasional strong profanity."},
+        {"role":"assistant","content": json.dumps({"category":"TEEN","confidence":0.72,"rationale":"family-friendly with strong language; choose stricter"})},
 
-        {"role": "user", "content": "A sci-fi TV series for teens 15+ with some strong language, no explicit content."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-14"})},
+        # Ambiguous / insufficient
+        {"role":"user","content":"Surprise me with a good sci-fi series."},
+        {"role":"assistant","content": json.dumps({"category":"","confidence":0.0,"rationale":"insufficient cues"})},
+   ]
 
-        {"role": "user", "content": "A gritty crime drama miniseries for adults but not overly graphic."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-14"})},
-
-        # --- TV-MA (mature audiences only) ---
-        {"role": "user", "content": "A dark horror TV series for adults—graphic violence and disturbing content."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-MA"})},
-
-        {"role": "user", "content": "An adult animated comedy film with explicit language and sexual humor."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-MA"})},
-
-        # --- Mixed/edge cues (choose most restrictive) ---
-        {"role": "user", "content": "A political thriller series—complex themes, occasional strong language, some intense scenes."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-14"})},
-
-        {"role": "user", "content": "A war movie based on true events—realistic combat and blood, clearly for adults."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-MA"})},
-
-        # --- MPAA → TV mapping ---
-        {"role": "user", "content": "A PG-13 superhero movie—fun but can be intense."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-14"})},
-
-        {"role": "user", "content": "We want a G-rated animated film for a birthday party."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-G"})},
-
-        {"role": "user", "content": "A PG family adventure—some peril, nothing heavy."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-PG"})},
-
-        {"role": "user", "content": "An R-rated crime movie with strong language."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-MA"})},
-        
-        # # --- Ambiguous / no signal ---
-        # {"role": "user", "content": "Surprise us with a good sci-fi series."},
-        # {"role": "assistant", "content": json.dumps({"rating": ""})},
-
-        # --- Common phrasing you’ll encounter ---
-        {"role": "user", "content": "A cozy rom-com TV show—clean, no crude jokes—good for family nights."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-G"})},
-
-        {"role": "user", "content": "A detective series for adults—swearing is okay, just not graphic violence."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-14"})},
-
-        {"role": "user", "content": "An edgy cyberpunk movie with mature themes and some nudity."},
-        {"role": "assistant", "content": json.dumps({"rating": "TV-MA"})},
-    ]
-
-    return [{"role": "system", "content": SYSTEM_PROMPT}] + few_shots + [
+   return [{"role": "system", "content": cat_system_prompt}] + cat_few_shots + [
         {"role": "user", "content": request_text}
     ]
-
-def extract_rating_from_request(request: dict) -> ExtractRating:
+  
+def extract_audience_category_from_request(request: dict) -> ExtractAudienceCategory:
     logger.info(f"Extracting rating from request: {request}")
 
-    message = build_messages(str(request))
+    message = build_audience_category_messages(str(request))
 
-    logger.info("Generating confirmation message")
-
-    viewing_type_extraction = client.beta.chat.completions.parse(
+    rating_extraction = client.beta.chat.completions.parse(
         model=model,
         messages = message,
-        response_format=ExtractRating
+        response_format=ExtractAudienceCategory
         )
     
-    rating_result = viewing_type_extraction.choices[0].message.parsed
+    msg = rating_extraction.choices[0].message
+    llm_raw_response = msg.content
+
+    logger.debug(f"RAW assistant: \n%s {llm_raw_response}")
+    
+    rating_result = rating_extraction.choices[0].message.parsed
     logger.info(f"Confirmation message generated successfully: {rating_result}")
     return rating_result
 
@@ -409,3 +292,68 @@ def extract_VAD_from_request(request: dict) -> ExtractVAD:
     VAD_result = description_extraction.choices[0].message.parsed
     logger.info(f"Confirmation message generated successfully: {VAD_result}")
     return VAD_result
+
+
+MOVIE_VAD_SYSTEM_PROMPT = """
+
+   You estimate Valence–Arousal–Dominance (VAD) for text.
+
+    Output JSON only:
+    {"vad":{"valence":0.0-1.0,"arousal":0.0-1.0,"dominance":0.0-1.0},"rationale":"<short>"}
+
+    Guidelines:
+    - Valence: unpleasant/sad=0.0 → pleasant/joyful=1.0
+    - Arousal: calm/slow=0.0 → intense/exciting=1.0
+    - Dominance: powerless/hemmed-in=0.0 → in-control/empowered=1.0
+    - Be concise. No extra keys.
+
+    Examples:
+    Text: "Cozy, low-stakes story about friends helping each other."
+    Output: {"vad":{"valence":0.8,"arousal":0.3,"dominance":0.5},"rationale":"Warm, calm support."}
+
+    Text: "Bleak slow-burn mystery that feels suffocating."
+    Output: {"vad":{"valence":0.2,"arousal":0.55,"dominance":0.3},"rationale":"Bleak tone, pressure."}
+"""
+
+movie_vad_few_shots = [
+    # Few-shots (user → assistant). The assistant replies match your schema but you can keep them concise:
+            {"role": "user","content": "Something light and cozy about friendship, low stakes, gentle humor."},
+            {"role": "assistant", "content": '{"vad":{"valence":0.80,"arousal":0.30,"dominance":0.50},"rationale":"Warm, calm, supportive vibe."}'},
+            {"role": "user", "content": "Bleak, slow-burn mystery that feels suffocating."},
+            {"role": "assistant", "content": '{"vad":{"valence":0.20,"arousal":0.55,"dominance":0.30},"rationale":"Low mood, mid arousal, low control."}'},         
+]
+
+def build_movie_vad_prompt(movie_description: str):
+     return (
+        [{"role": "system", "content": MOVIE_VAD_SYSTEM_PROMPT}]
+        + movie_vad_few_shots
+        + [{"role": "user", "content": movie_description}]  # <-- real input goes here
+    )
+
+def extract_movie_vad_score() -> ExtractMovieVAD:
+    filtered_df = st.session_state['filtered_df'].iloc[:3]
+    movie_vad_score_obj = {}
+    for index, row in filtered_df.iterrows():
+        movie_description = row['description']
+        movie_id = row['show_id']
+        movie_vad_score = client.beta.chat.completions.parse(
+            model=model,
+            seed=7,
+            messages=build_movie_vad_prompt(movie_description),
+            response_format=ExtractMovieVAD,
+        )
+        movie_VAD_result = movie_vad_score.choices[0].message.parsed
+        logger.info(f"Confirmation message generated successfully: {movie_VAD_result}")
+        if movie_VAD_result:
+            print(f"movie_VAD_result: {movie_VAD_result.movie_vad}")
+            print(f"st.session_state.movie_criteria:{ st.session_state.movie_criteria}")
+            movie_vad_score_obj = {
+                "valence": movie_VAD_result.movie_vad.valence,
+                "arousal": movie_VAD_result.movie_vad.arousal,
+                "dominance": movie_VAD_result.movie_vad.dominance,
+                "movie_id": movie_id
+            }
+            st.session_state.movie_criteria["movie_VAD"].append(movie_vad_score_obj)
+    movie_VAD_lst = st.session_state.movie_criteria["movie_VAD"]
+    return movie_VAD_lst
+    

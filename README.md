@@ -90,3 +90,19 @@
 “Mystery miniseries—fine for teens, suspenseful, no gore.”
 
 “Sci-fi thriller TV show—mature themes, occasional strong language, cerebral tone.”
+
+
+# Vides score
+1.0 → practically identical vibe (direction + intensity match)
+
+~0.8–1.0 → strong match
+
+~0.65–0.8 → good match
+
+~0.45–0.65 → fair/okay match
+
+~0.25–0.45 → weak match
+
+0–0.25 → poor match
+
+< 0 → actively bad (opposite vibe)

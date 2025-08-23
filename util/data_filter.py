@@ -3,22 +3,21 @@ import streamlit as st
 
 def manually_filter_movies() -> pd.DataFrame:
     movie_df = st.session_state['movie_dataframe']
-
-    genre_lst = st.session_state['movie_criteria']['genre']
-    new_genre_lst = split_list(genre_lst)
-    if len(new_genre_lst) > 1:
-        genre_filtered_movie_df = movie_df[movie_df['genre'].apply(lambda lst: any(item in lst for item in new_genre_lst))]
-        print(f"line 12. genre_filtered_movie_df: {genre_filtered_movie_df}")
-    else:
-        genre_filtered_movie_df = movie_df[movie_df['genre'].str.contains(genre_lst[0], case=False, na=False)]
-        # genre_filtered_movie_df = movie_df[movie_df['genre'].apply(lambda lst: any(item in lst for item in genre_lst))]
-        print(f"genre_filtered_movie_df: {genre_filtered_movie_df}")
-        genre_view_type_filtered_movie_df = filter_view_type(genre_filtered_movie_df)
-        print(f"genre_view_type_filtered_movie_df: {genre_filtered_movie_df}")
-
+    llm_genre = st.session_state['movie_criteria']['llm_genre']['genre']
+    genre_obj = st.session_state['movie_criteria']['llm_genre']
+    viewing_type = st.session_state['movie_criteria']['viewing_type']
+    if llm_genre:
+        genre_filtered_movie_df = movie_df[movie_df['genre'].str.contains(llm_genre)]
+        if genre_filtered_movie_df.empty:
+            return {"message": f"Unable to filter on {llm_genre}. Please modify your request with this in mind"}
     genre_view_type_filtered_movie_df = filter_view_type(genre_filtered_movie_df)
-    print(f"line 22. genre_view_type_filtered_movie_df: {genre_filtered_movie_df}")
-    return genre_view_type_filtered_movie_df
+    if genre_view_type_filtered_movie_df.empty:
+        return {"message": f"Unable to filter on {viewing_type}. Please modify your request with this in mind"}
+    genre_view_type_audience_category_movie_df = filter_audience_category(genre_view_type_filtered_movie_df)
+    print(f"genre_view_type_audience_category_movie_df: {genre_view_type_audience_category_movie_df}")
+    if genre_view_type_audience_category_movie_df.empty:
+        return {"message": f"Unable to filter on {viewing_type}. Please modify your request with this in mind"}
+    return genre_view_type_audience_category_movie_df
 
 def filter_view_type(genre_filtered_movie_df: pd.DataFrame) -> pd.DataFrame:
     view_type_lst = st.session_state['movie_criteria']['viewing_type']
@@ -30,6 +29,40 @@ def filter_view_type(genre_filtered_movie_df: pd.DataFrame) -> pd.DataFrame:
     view_type_movie_df = genre_filtered_movie_df[genre_filtered_movie_df['type'].apply(lambda lst: any(item in lst for item in view_type_lst))]
     return view_type_movie_df
 
+def filter_audience_category(df):
+    print(f"st.session_state.movie_criteria['audience_category']: {st.session_state.movie_criteria['viewing_type'][0]}")
+    if st.session_state.movie_criteria['viewing_type'][0] == "Movie":
+        if st.session_state.movie_criteria["audience_category"]:
+            audience_category = st.session_state.movie_criteria["audience_category"]["category"]
+        if audience_category == "CHILDREN":
+            print(f"CHILDREN - audience_category: {audience_category}")
+            rating = "G"
+            audience_category_df  = df[df['rating'] == rating]
+            return audience_category_df
+        if audience_category == "TEEN":
+            print(f"TEEN - audience_category: {audience_category}")
+            rating = "PG-13"
+            audience_category_df  = df[df['rating'] == rating]
+            return audience_category_df
+        if audience_category == "ADULT":
+            print(f"ADULT - audience_category: {audience_category}")
+            rating = "R"
+            audience_category_df  = df[df['rating'] == rating]
+            return audience_category_df
+    if st.session_state.movie_criteria["audience_category"]:
+            audience_category = st.session_state.movie_criteria["audience_category"]["category"]
+            if audience_category == "CHILDREN":
+                rating = "TV-Y7"
+                audience_category_df  = df[df['rating'] == rating ]
+                return audience_category_df
+            if audience_category == "TEEN":
+                rating = "TV-14"
+                audience_category_df  = df[df['rating'] == rating]
+                return audience_category_df
+            if audience_category == "ADULT":
+                rating = "TV-MA"
+                audience_category_df  = df[df['rating'] == rating]
+                return audience_category_df
 def split_list(lst: list[str]) -> list[str]:
     output_lst: list[str] = []
     for element in lst:
@@ -41,9 +74,5 @@ def split_list(lst: list[str]) -> list[str]:
     return output_lst
 
 
-def extract_movie_vad_score() -> pd.DataFrame:
-    filtered_df = st.session_state['filtered_df']
-    for index, row in filtered_df.iterrows():
-        print(f"index: {index}")
-        print(f"row: {row}")
-    return 'hi'
+
+

@@ -5,8 +5,10 @@ from dotenv import load_dotenv
 import pandas as pd
 import streamlit as st
 from util.helper import load_data
-from util.function_calls import extract_genre_from_request, extract_VAD_from_request, extract_viewing_type_from_request, extract_rating_from_request
-from util.data_filter import manually_filter_movies, extract_movie_vad_score
+from util.genre_extracter import extract_genre_from_request
+from util.function_calls import extract_VAD_from_request, extract_viewing_type_from_request, extract_audience_category_from_request, extract_movie_vad_score
+from util.data_filter import manually_filter_movies
+from util.vad_calculation import vad_similarity
 
 # Set up logging configuration
 logging.basicConfig(
@@ -29,6 +31,8 @@ else:
 client = OpenAI()
 model="o4-mini"
 
+st.set_page_config(page_title="AI Movie Picker")
+
 with st.sidebar:
     uploaded_file = st.file_uploader("Load Movie Data...", type=["csv", "xlsx"])
 
@@ -37,6 +41,7 @@ with st.sidebar:
             data = load_data(uploaded_file)
             if 'movie_dataframe' not in st.session_state:
                 st.session_state['movie_dataframe'] = data
+            st.subheader(f"Rows: {data.shape[0]}, Columns: {data.shape[1]}")
             st.write(data)
         elif uploaded_file.name.endswith(".xlsx"):
             data = load_data(uploaded_file)
@@ -45,7 +50,9 @@ with st.sidebar:
             st.error("Unsupported file format. Please upload a CSV or Excel file.")
     
       
-st.title("🍿 LLM Movie Picker")
+st.subheader("🍿 LLM Movie Picker")
+st.caption("Let’s find your perfect pick! Drop the genre, movie/TV, preferred rating, and a director if you’ve got one")
+st.divider()
 
 # Initialize chat history
 if "messages" not in st.session_state:
@@ -53,11 +60,13 @@ if "messages" not in st.session_state:
 # Initialize movie criteria history
 if "movie_criteria" not in st.session_state:
     st.session_state.movie_criteria = {
-        "genre": None,
+        "llm_genre": {},
         "viewing_type": None,
-        "rating": None,
-        "VAD": {}
+        "audience_category": {},
+        "VAD": {},
+        "movie_VAD": []
     }
+print(f"st.session_state.movie_criteria: {st.session_state.movie_criteria}")
 if 'filtered_df' not in st.session_state:
     st.session_state['filtered_df'] = pd.DataFrame()
 
@@ -74,8 +83,8 @@ def process_query(user_query: str):
     # 2. Extract genre from user query
     with st.spinner("Extracting genres…"):
         response = extract_genre_from_request({"query": user_query})
-    if response.genre:
-        set_genre_session(response.genre)
+    if response:
+        set_genre_session(response)
     else:
         st.warning("No genre found in your query. Please try again.")
     # 3. Extract view type from user query (if needed)
@@ -86,12 +95,13 @@ def process_query(user_query: str):
     else:
         st.warning("No viewing type found in your query. Please try again.")
     # 4. Extract rating from user query (if needed)
-    with st.spinner("Extracting rating…"):
-        rating_response = extract_rating_from_request({"query": user_query})
-    if rating_response:
-        set_rating_session(rating_response.rating)
-    else:
-        st.warning("No rating found in your query. Please try again.")
+    with st.spinner("Extracting audience category…"):
+        audience_category_response = extract_audience_category_from_request({"query": user_query})
+        print(f"audience_cat: {audience_category_response}")
+    if audience_category_response.confidence < 0.6:
+        st.warning(f"Unable to extract category, due to {audience_category_response.rationale}. Please, try again with this in mind")
+        return 
+    set_audience_category_session(audience_category_response)
     # 4. Extract VAD from user query (if needed)
     with st.spinner("Extracting VAD…"):
         VAD_response = extract_VAD_from_request({"query": user_query})
@@ -100,30 +110,49 @@ def process_query(user_query: str):
         
     else:
         st.warning("No VAD found in your query. Please try again.")
+    # movie_vad_score = extract_movie_vad_score()
+    return_value = manually_filter_movies()
+    if isinstance(return_value, dict):
+        st.warning(return_value['message'])
+        return 
+    set_filtered_data_session(return_value)
     movie_vad_score = extract_movie_vad_score()
-    filtered_df = manually_filter_movies()
-    # set_filtered_data_sesseion(filtered_df)
-    st.write(filtered_df)
+    if movie_vad_score:
+        user_vad = st.session_state.movie_criteria['VAD']
+        movie_vad = st.session_state.movie_criteria['movie_VAD']
+        return_vad_similarities = vad_similarity(user_vad, movie_vad)
+        st.write(return_vad_similarities)
+    st.write(movie_vad_score)
+    st.write(return_value)
    
 
-def set_filtered_data_sesseion(df):
+def set_filtered_data_session(df):
     st.session_state['filtered_df'] = df
     st.success(f"st.session_state['filtered_df'] set: {st.session_state['filtered_df']}")
 
 def add_query_to_history(user_query: str):
     st.session_state.messages.append({"role": "user", "content": user_query})
 
-def set_genre_session(response: list[str]):
-    st.session_state.movie_criteria["genre"] = response
-    st.success(f"Genre(s) extracted: {', '.join(response)}")
+def set_genre_session(response: dict):
+    st.session_state.movie_criteria["llm_genre"] = {
+        "genre": response.genre, 
+        "confidence": response.confidence,
+        "rationale": response.rationale
+    }
+    st.success(f"Genre extracted: {response}")
 
 def set_view_type_session(response: list[str]):
     st.session_state.movie_criteria["viewing_type"] = response
     st.success(f"Viewing type(s) extracted: {', '.join(response)}")
 
-def set_rating_session(response: str):
-    st.session_state.movie_criteria["rating"] = response
-    st.success(f"Rating extracted: {response}")
+def set_audience_category_session(response: str):
+    print(f"audience_category response: {response}")
+    st.session_state.movie_criteria["audience_category"] = {
+        "category":response.category,
+        "confidence": response.confidence,
+        "rationale": response.rationale
+    }
+    st.success(f"Audience Category extracted: {response}")
 
 def set_vad_session(vad: dict):
     st.session_state.movie_criteria["VAD"] = {
@@ -131,11 +160,11 @@ def set_vad_session(vad: dict):
         "arousal": vad.vad.arousal,
         "dominance": vad.vad.dominance
     }
+    print(f"st.session_state.movie_criteria: {st.session_state.movie_criteria}")
     st.success(f"VAD extracted: {vad.vad}")
 
 # Respond to user input
-if user_input := st.chat_input("What kind of movie are you in the mood for? Include genre, movie or TV and rating... 👋"):
-    st.session_state.movie_criteria = {}
+if user_input := st.chat_input("What kind of movie are you in the mood for? 👋"):
     # Display user message in chat message container
     with st.chat_message("user"):
         st.markdown(user_input)
