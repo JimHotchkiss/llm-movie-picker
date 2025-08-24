@@ -8,7 +8,7 @@ from util.helper import load_data
 from util.genre_extracter import extract_genre_from_request
 from util.function_calls import extract_VAD_from_request, extract_viewing_type_from_request, extract_audience_category_from_request, extract_movie_vad_score
 from util.data_filter import manually_filter_movies
-from util.vad_calculation import vad_similarity
+from util.vad_calculation import rank_movies_by_vad
 
 # Set up logging configuration
 logging.basicConfig(
@@ -107,7 +107,6 @@ def process_query(user_query: str):
         VAD_response = extract_VAD_from_request({"query": user_query})
     if VAD_response:
         set_vad_session(VAD_response)
-        
     else:
         st.warning("No VAD found in your query. Please try again.")
     # movie_vad_score = extract_movie_vad_score()
@@ -119,8 +118,8 @@ def process_query(user_query: str):
     movie_vad_score = extract_movie_vad_score()
     if movie_vad_score:
         user_vad = st.session_state.movie_criteria['VAD']
-        movie_vad = st.session_state.movie_criteria['movie_VAD']
-        return_vad_similarities = vad_similarity(user_vad, movie_vad)
+        movie_vad_array = st.session_state.movie_criteria['movie_VAD']
+        return_vad_similarities = rank_movies_by_vad(user_vad, movie_vad_array)
         st.write(return_vad_similarities)
     st.write(movie_vad_score)
     st.write(return_value)

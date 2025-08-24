@@ -16,12 +16,8 @@ def _vec(vad: dict | tuple | list) -> np.ndarray:
 
 def vad_similarity(user_vad, movie_vad, w=(1.0, 1.0, 0.7), alpha=0.6) -> float:
     u = _vec(user_vad)
-    m1 = _vec(movie_vad[0])
-    m2 = _vec(movie_vad[1])
-    m3 = _vec(movie_vad[2])
+    m = _vec(movie_vad)
     w = np.asarray(w, dtype=float)
-    print(f"m1, m2, m3: {m1}, {m2}, {m3}")
-    return 'HI'
 
     # Weight the vad to de-emphasise the dominance
     u_w = u * w
@@ -40,6 +36,16 @@ def vad_similarity(user_vad, movie_vad, w=(1.0, 1.0, 0.7), alpha=0.6) -> float:
 
     return alpha * cos + (1 - alpha) * dist_score
 
-    print(f"user_vad: {user_vad}")
-    print(f"movie_vad: {movie_vad}")
-    return "Hi from VAD similarities"
+
+def rank_movies_by_vad(user_vad, movies_vad_array):
+    print(f"movie_vad_array: {movies_vad_array}")
+    # movies_vad_array: shape (N,3) in [0,1], same order as movie_ids
+    scores = []
+    for key in movies_vad_array:
+        # 'valence': 0.9, 'arousal': 0.8, 'dominance'
+        print(f"valence: {key['valence']}, arousal: {key['arousal']}, dominance: {key['dominance']}")
+        # s = vad_similarity(user_vad, mv)
+        # scores.append((mid, s))
+    # sort high → low
+    # return sorted(scores, key=lambda t: t[1], reverse=True)
+    return 'Hi'
