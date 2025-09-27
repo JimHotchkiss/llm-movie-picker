@@ -12,8 +12,6 @@ def _vec(vad: dict | tuple | list) -> np.ndarray:
     a = np.clip(a, 0.0, 1.0) * 2.0 - 1.0
     return a
 
-
-
 def vad_similarity(user_vad, movie_vad, w=(1.0, 1.0, 0.7), alpha=0.6) -> float:
     u = _vec(user_vad)
     m = _vec(movie_vad)
@@ -37,15 +35,44 @@ def vad_similarity(user_vad, movie_vad, w=(1.0, 1.0, 0.7), alpha=0.6) -> float:
     return alpha * cos + (1 - alpha) * dist_score
 
 
+def convert_movies_vad_vector_obj(movies_vad_array):
+    movies_vad_vector_obj = {}
+    movies_vad_vector_lst = []
+    for index, element in enumerate(movies_vad_array):
+        if index == 0:
+            movies_vad_vector_obj = {
+                "movie_id":element['movie_id'],
+                "movie_vector":[element['valence'], element['arousal'], element['dominance']]
+            }
+            movies_vad_vector_lst.append(movies_vad_vector_obj)
+        elif index == 1:
+            movies_vad_vector_obj = {
+                "movie_id":element['movie_id'],
+                "movie_vector":[element['valence'], element['arousal'], element['dominance']]
+            }
+            movies_vad_vector_lst.append(movies_vad_vector_obj)
+        else:
+            movies_vad_vector_obj = {
+                "movie_id":element['movie_id'],
+                "movie_vector":[element['valence'], element['arousal'], element['dominance']]
+            }
+            movies_vad_vector_lst.append(movies_vad_vector_obj)
+    return movies_vad_vector_lst
+        
+
 def rank_movies_by_vad(user_vad, movies_vad_array):
-    print(f"movie_vad_array: {movies_vad_array}")
+    user_vad_array = list(user_vad.values())
+    movies_vad_vector_list = convert_movies_vad_vector_obj(movies_vad_array)
     # movies_vad_array: shape (N,3) in [0,1], same order as movie_ids
+    movies_vad_score_obj = {}
     scores = []
-    for key in movies_vad_array:
-        # 'valence': 0.9, 'arousal': 0.8, 'dominance'
-        print(f"valence: {key['valence']}, arousal: {key['arousal']}, dominance: {key['dominance']}")
-        # s = vad_similarity(user_vad, mv)
-        # scores.append((mid, s))
-    # sort high → low
-    # return sorted(scores, key=lambda t: t[1], reverse=True)
-    return 'Hi'
+    # {"movie1_id": [1,2,3],"movie2_id": [4,5,6] }
+    for element in movies_vad_vector_list:
+        print(f"element: {element}")
+        s = vad_similarity(user_vad_array, element['movie_vector'])
+        movies_vad_score_obj = {
+            "movie_id": element['movie_id'],
+            "movie_vad_score": s
+        }
+        scores.append(movies_vad_score_obj)
+    return scores

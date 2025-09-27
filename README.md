@@ -106,3 +106,4 @@
 0–0.25 → poor match
 
 < 0 → actively bad (opposite vibe)
+

@@ -48,10 +48,29 @@ with st.sidebar:
             st.write(data)
         else:
             st.error("Unsupported file format. Please upload a CSV or Excel file.")
-    
-      
+
+    st.markdown("""
+    <style>
+    .stButton > button {
+        background-color: #0E1116; /* Green */
+        color: white;
+        padding: 10px 20px;
+        border-radius: 8px;
+        border: none;
+        cursor: pointer;
+    }
+
+    .stButton > button:hover {
+        background-color: #0E1116;
+        color: grey
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.button("Movie API Request")
+# Content
 st.subheader("🍿 LLM Movie Picker")
-st.caption("Let’s find your perfect pick! Drop the genre, movie/TV, preferred rating, and a director if you’ve got one")
+st.caption("Let’s find your perfect pic! Drop the genre, movie/TV, preferred rating, and a director if you’ve got one")
 st.divider()
 
 # Initialize chat history
@@ -66,7 +85,6 @@ if "movie_criteria" not in st.session_state:
         "VAD": {},
         "movie_VAD": []
     }
-print(f"st.session_state.movie_criteria: {st.session_state.movie_criteria}")
 if 'filtered_df' not in st.session_state:
     st.session_state['filtered_df'] = pd.DataFrame()
 
@@ -97,7 +115,6 @@ def process_query(user_query: str):
     # 4. Extract rating from user query (if needed)
     with st.spinner("Extracting audience category…"):
         audience_category_response = extract_audience_category_from_request({"query": user_query})
-        print(f"audience_cat: {audience_category_response}")
     if audience_category_response.confidence < 0.6:
         st.warning(f"Unable to extract category, due to {audience_category_response.rationale}. Please, try again with this in mind")
         return 
@@ -110,24 +127,25 @@ def process_query(user_query: str):
     else:
         st.warning("No VAD found in your query. Please try again.")
     # movie_vad_score = extract_movie_vad_score()
-    return_value = manually_filter_movies()
-    if isinstance(return_value, dict):
-        st.warning(return_value['message'])
+    return_filter_value = manually_filter_movies()
+    if isinstance(return_filter_value, dict):
+        st.warning(return_filter_value['message'])
         return 
-    set_filtered_data_session(return_value)
+    set_filtered_data_session(return_filter_value)
+    filtered_movies_df_description = st.session_state['filtered_df'][['title','description']].head(3)
     movie_vad_score = extract_movie_vad_score()
     if movie_vad_score:
         user_vad = st.session_state.movie_criteria['VAD']
         movie_vad_array = st.session_state.movie_criteria['movie_VAD']
-        return_vad_similarities = rank_movies_by_vad(user_vad, movie_vad_array)
-        st.write(return_vad_similarities)
-    st.write(movie_vad_score)
-    st.write(return_value)
-   
+        return_movies_vad_ranking = rank_movies_by_vad(user_vad, movie_vad_array)
+        print(f"st.session_state.movie_criteria['VAD']: {st.session_state.movie_criteria['VAD']}")
+        st.write(movie_vad_score)
+        st.write(return_movies_vad_ranking )  
+        st.write(filtered_movies_df_description) 
 
 def set_filtered_data_session(df):
     st.session_state['filtered_df'] = df
-    st.success(f"st.session_state['filtered_df'] set: {st.session_state['filtered_df']}")
+    st.success(f"Filtered dataframe set successfully: {st.session_state['filtered_df'].shape}")
 
 def add_query_to_history(user_query: str):
     st.session_state.messages.append({"role": "user", "content": user_query})
@@ -145,7 +163,6 @@ def set_view_type_session(response: list[str]):
     st.success(f"Viewing type(s) extracted: {', '.join(response)}")
 
 def set_audience_category_session(response: str):
-    print(f"audience_category response: {response}")
     st.session_state.movie_criteria["audience_category"] = {
         "category":response.category,
         "confidence": response.confidence,
@@ -159,7 +176,6 @@ def set_vad_session(vad: dict):
         "arousal": vad.vad.arousal,
         "dominance": vad.vad.dominance
     }
-    print(f"st.session_state.movie_criteria: {st.session_state.movie_criteria}")
     st.success(f"VAD extracted: {vad.vad}")
 
 # Respond to user input
