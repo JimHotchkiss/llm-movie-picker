@@ -1,109 +1,255 @@
-* Sample queries
- "I want to watch a crime fiction, TV series that has a strong romantic component."
+Here’s a polished, recruiter-friendly **README.md** you can drop into your repo. It’s eye-catching, clear, and shows off real data-science chops while staying easy to run.
 
- “In the mood for a cozy, low-stakes TV show with gentle humor and an ensemble cast, ideally set in a small town. Episodes around 25 minutes.”
+---
 
-“A movie that’s a smart thriller with minimal gore, strong atmosphere, and a satisfying twist—under 2 hours, please.”
+# 🎬 MoodMatch: VAD-Powered Movie/Series Recommender
 
-“Looking for a limited series/miniseries—a historical drama about court politics with a strong female lead and a slow-burn vibe.”
+> *“Find the right **vibe**, not just the right **genre**.”*
+> Given a short mood description (e.g., *“feel-good underdog sports story—rousing and triumphant; movie or miniseries both work”*), **MoodMatch** recommends titles that match both the **semantics** (plot/topic) and the **emotion** (VAD: Valence–Arousal–Dominance).
 
-“Any animated family film that feels uplifting and heartwarming, preferably something from the last 5 years with animal characters.”
+![screenshot-placeholder](docs/screenshot.png)
 
-“A space docuseries that focuses on engineering challenges over personalities—6–8 episodes, educational, calm tone rather than hype.”
+---
 
-“In the mood for a cozy, low-stakes TV series with gentle humor in a small town—episodes around 25–30 minutes.”
+## ✨ Highlights
 
-“A smart thriller movie with minimal gore, strong atmosphere, and a twist ending—under 2 hours.”
+* **Emotion-aware search** using **VAD** (Valence, Arousal, Dominance)
+* **Hybrid ranking**: semantic similarity (embeddings) + mood similarity (VAD) + genre match
+* **Streamlit UI** with:
 
-“A limited series historical drama about court politics—slow-burn, character-driven.”
+  * VAD sliders (or auto-detect VAD from your text via LLM)
+  * “Why this matched” explanations (VAD closeness, genre overlap, semantic score)
+  * Optional playlist export / shortlist save
+* **Efficient data science pipeline**:
 
-“An animated family film that feels uplifting and heartwarming—animal protagonists, preferably from the last 5 years.”
+  * Precompute embeddings & VAD for your catalog once
+  * Fast retrieval with NumPy (no vector DB required at 8.5k rows)
+  * Optional Qdrant/Chroma integration
 
-“Gritty crime drama set in the 1970s—tense and morally gray; movie or show is fine.”
+---
 
-“A space docuseries that focuses on engineering challenges and real footage—calm, educational tone.”
+## 🧠 What makes this a Data Science project?
 
-“A romantic comedy movie set in Europe, not too cheesy, modern vibe, diverse cast.”
+* **Problem framing → metrics**: turn vague “vibe” into numeric targets (VAD) and rank with a blended score
+* **Feature engineering**: embeddings (semantics), VAD (mood), genre signals
+* **Unsupervised learning & retrieval**: similarity search, clustering (optional)
+* **Evaluation**: precision@K, ablations (weight sweeps, with/without VAD)
+* **MLOps-lite**: cached artifacts (embeddings/VAD), reproducible scripts, config
 
-“Bleak, slow-burn mystery with an unreliable narrator in a snowy setting—prefer a film.”
+---
 
-“A feel-good sports story about an underdog team—rousing and triumphant; movie or miniseries both work.”
+## 🏗️ Architecture
 
-“Dark fantasy series with political intrigue and magic, mature tone, long episodes.”
+```
+User Text  ──► Parse Intent + VAD (LLM) ──► Filters (genre/type/audience)
+                           │
+                           ▼
+                    Query Embedding (same model as catalog)
+                           │
+      ┌────────────────────┴──────────────────────┐
+      ▼                                           ▼
+Movie Embeddings (N×d, .npy)                Movie VAD (N×3, in parquet)
+      │                                           │
+      └─────────────► Hybrid Scoring ◄────────────┘
+                     score = 0.5*sem + 0.3*vad + 0.2*genre
+                                   │
+                                   ▼
+                            Top-K Recommendations
+```
 
-“Looking for a romantic comedy movie that’s light and family-friendly for a Friday night.”
+---
 
-“A crime thriller TV series that’s for adults, tense but not super gory.”
+## 🧰 Tech Stack
 
-“An animated adventure film that’s fun for the whole family, animal characters preferred.”
+* **Python**, **pandas**, **NumPy**, **scikit-learn**
+* **Embeddings:** OpenAI `text-embedding-3-small` (or local `sentence-transformers`)
+* **LLM (optional):** OpenAI for structured extraction + text→VAD
+* **UI:** Streamlit
+* **Storage:** `movies.parquet` + `embeddings.npy` (fast & simple)
+  *Optional:* Qdrant/Chroma for vector search
 
-“A historical drama miniseries with palace intrigue—mature themes okay, not graphic.”
+---
 
-“Sci-fi movie with space exploration vibes, fine for teens, minimal swearing.”
+## 📦 Repository Structure
 
-“Fantasy TV show with magic and politics—suitable for older teens.”
+```
+.
+├─ app/
+│  └─ streamlit_app.py           # Streamlit UI
+├─ data/
+│  ├─ movies.parquet             # catalog + VAD columns
+│  └─ embeddings.npy             # (N, d) float32, unit-normalized
+├─ scripts/
+│  ├─ precompute.py              # clean, embed, VAD, save artifacts
+│  ├─ evaluate.py                # precision@K, ablations
+│  └─ tmdb_enrich.py             # (optional) poster/keywords
+├─ src/
+│  ├─ extract.py                 # 1-call LLM: genres/type/audience + VAD
+│  ├─ features.py                # embedding adapters, normalization
+│  ├─ vad.py                     # LLM or lexicon; teacher→student option
+│  ├─ rank.py                    # hybrid scoring + MMR diversity
+│  └─ utils.py
+├─ docs/
+│  ├─ screenshot.png
+│  └─ model_card.md
+├─ .env.example
+└─ README.md
+```
 
-“A documentary film about climate tech that’s kid-safe and educational.”
+---
 
-“Horror movie that’s for adults, creepy atmosphere but low on gore.”
+## 🔧 Setup
 
-“A true-crime docuseries that’s for mature audiences—detailed investigations, no sensationalism.”
+1. **Clone & env**
 
-“Coming-of-age drama movie that’s teen-friendly, heartfelt, not explicit.”
+```bash
+git clone <your-repo-url>
+cd moodmatch
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env
+```
 
-“Action-adventure film that’s family-appropriate, big set pieces, no strong language.”
+2. **Configure** `.env`
 
-“Mystery TV series with an unreliable narrator—okay for teens, not disturbing.”
+```
+# Choose ONE embedding source
+OPENAI_API_KEY=sk-...
+EMBEDDING_PROVIDER=openai            # or: local
+EMBEDDING_MODEL=text-embedding-3-small
+# LLM for parsing/VAD (optional but nice)
+LLM_MODEL=gpt-4o-mini
+```
 
-“A feel-good sports movie that’s family-friendly, inspirational underdog story.”
+3. **Data**
 
-“Dark fantasy series with monsters and politics—adults only, intense battles.”
+* Place your CSV in `data/raw/` (e.g., Netflix catalog).
+* (Optional) Add TMDB API key to enrich posters/keywords.
 
-“Rom-com TV show that’s clean and cozy, good for all ages.”
+---
 
-“A biopic movie about a musician—older teen appropriate, mild language.”
+## 🏗️ One-time Precompute
 
-“Noir crime film with a moody vibe—mature audiences, violence implied more than shown.”
+Creates `movies.parquet` (with `vad_v, vad_a, vad_d`) and `embeddings.npy`.
 
-“Nature docuseries that’s safe for kids, stunning cinematography.”
+```bash
+python scripts/precompute.py \
+  --input data/raw/netflix_titles.csv \
+  --output-parquet data/movies.parquet \
+  --output-embeddings data/embeddings.npy \
+  --embedding-provider openai \
+  --embedding-model text-embedding-3-small \
+  --vad-mode teacher_student --sample-size 400
+```
 
-“Legal/courtroom drama series that’s fine for teens, complex themes, no graphic content.”
+**How VAD is computed:**
 
-“Animated fantasy film—family night material, gentle humor.”
+* **Teacher–Student (recommended):**
+  LLM labels ~400 samples → train a small regressor (Ridge/MLP) mapping **embedding → VAD** → predict VAD for all titles. Quality ≈ LLM, cost tiny.
+* **Lexicon fallback:** fast/zero-cost baseline.
+* Write VAD to `movies.parquet` as columns: `vad_v`, `vad_a`, `vad_d` (in [0,1]).
 
-“Psychological thriller movie—adults, intense but not graphic.”
+---
 
-“Western miniseries—older teen to adult, some violence, character-driven.”
+## ▶️ Run the App
 
-“Medical drama TV show—parental guidance suggested, occasional surgery scenes.”
+```bash
+streamlit run app/streamlit_app.py
+```
 
-“War film based on true events—mature audiences, realistic but not gratuitous.”
+**Features**
 
-“Superhero movie—family-friendly, exciting without heavy violence.”
+* Enter a mood prompt (or just use sliders)
+* Auto-parse **genres/type/audience** + **VAD** (with confidence)
+* Filter catalog, compute **semantic + mood** similarity, and **rank**
+* See top picks with **explanations** and posters
 
-“Travel/food docuseries—all ages, relaxing and informative.”
+---
 
-“Anime fantasy series—teen-friendly, adventurous, minimal fanservice.”
+## 🧪 Evaluation (optional but impressive)
 
-“Satirical comedy film—adults, sharp humor, light profanity.”
+```bash
+python scripts/evaluate.py \
+  --catalog data/movies.parquet \
+  --embeddings data/embeddings.npy \
+  --queries tests/queries.yml \
+  --k 10 --weights "0.5,0.3,0.2"
+```
 
-“Mystery miniseries—fine for teens, suspenseful, no gore.”
+* **Metrics:** precision@K, coverage, diversity (artist/franchise cap), silhouette (if clustering)
+* **Ablations:** sweep weights `α, β, γ`; compare with/without VAD; cosine vs L2 for VAD
 
-“Sci-fi thriller TV show—mature themes, occasional strong language, cerebral tone.”
+---
 
+## 🧩 Scoring Details
 
-# Vides score
-1.0 → practically identical vibe (direction + intensity match)
+* **Semantic similarity**: cosine between **query embedding** and **movie embedding**
+* **Mood similarity**: cosine (or 1 − L2/√3) between **user VAD** and **movie VAD**
+* **Genre overlap**: Jaccard between requested genres and movie genres
 
-~0.8–1.0 → strong match
+```
+score = 0.50 * sim_embed
+      + 0.30 * sim_vad
+      + 0.20 * genre_overlap
+# optional gate: require sim_vad ≥ 0.6
+```
 
-~0.65–0.8 → good match
+*(Tune weights; log runs in `experiments/results.csv`.)*
 
-~0.45–0.65 → fair/okay match
+---
 
-~0.25–0.45 → weak match
+## 🧑‍🍳 Configuration Tips
 
-0–0.25 → poor match
+* **No vector DB needed** at 8.5k rows (NumPy is blazing fast).
+* Want résumé flair? Swap in **Qdrant**: upsert embeddings + metadata and use server-side filtering.
+* **Normalize** all vectors to unit length → dot product = cosine.
+* Cache all LLM outputs by a stable hash (title+year+overview).
 
-< 0 → actively bad (opposite vibe)
+---
 
+## 🔒 Privacy & Safety
+
+* Store **derived VAD** and embeddings; raw user prompts optional (off by default).
+* Provide a “Demo Mode” using a static sample so anyone can try without API keys.
+
+---
+
+## 🗺️ Roadmap
+
+* [ ] Cross-encoder rerank on top-50 for sharper final ordering
+* [ ] Cluster explorer (“browse by vibe”)
+* [ ] Playlist export / “Watchlist” persistence
+* [ ] Multi-language support
+* [ ] Deploy to Streamlit Community Cloud (one-click demo)
+
+---
+
+## 🙏 Acknowledgments
+
+* VAD (Valence–Arousal–Dominance) concept from affective computing literature
+* TMDB for metadata/posters (if used), Netflix CSV (sample catalogs), and open-source embedding models
+
+---
+
+## 📝 License
+
+MIT (see `LICENSE`)
+
+---
+
+### Quick Start (TL;DR)
+
+```bash
+# 1) Install + configure
+pip install -r requirements.txt
+cp .env.example .env  # add OPENAI key or choose local embeddings
+
+# 2) Precompute once
+python scripts/precompute.py --input data/raw/netflix_titles.csv \
+  --output-parquet data/movies.parquet --output-embeddings data/embeddings.npy
+
+# 3) Run UI
+streamlit run app/streamlit_app.py
+```
+
+Enjoy finding the **perfect vibe**. 🎥💫

@@ -12,3 +12,4 @@ wheels/
 # Environment variables
 .env
 vad_explanation.ipynb
+query_sample.md
